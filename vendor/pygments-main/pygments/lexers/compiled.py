@@ -23,7 +23,8 @@ from pygments.scanner import Scanner
 from pygments.lexers.functional import OcamlLexer
 from pygments.lexers.jvm import JavaLexer, ScalaLexer
 
-__all__ = ['CLexer', 'CppLexer', 'DLexer', 'DelphiLexer', 'ECLexer',
+__all__ = ['CLexer', 'C0Lexer',
+           'CppLexer', 'DLexer', 'DelphiLexer', 'ECLexer',
            'DylanLexer', 'ObjectiveCLexer', 'FortranLexer', 'GLShaderLexer',
            'PrologLexer', 'CythonLexer', 'ValaLexer', 'OocLexer', 'GoLexer',
            'FelixLexer', 'AdaLexer', 'Modula2Lexer', 'BlitzMaxLexer',
@@ -165,6 +166,270 @@ class CLexer(RegexLexer):
                     token = Keyword.Type
                 elif self.c99highlighting and value in self.c99_types:
                     token = Keyword.Type
+            yield index, token, value
+
+class C0Lexer(RegexLexer):
+    """
+    For C0 source code
+    """
+    name = 'C0'
+    aliases = ['c0']
+    filenames = ['*.c0', '*.h0' ]
+    mimetypes = ['text/x-c0src']
+
+    reserved_opers = [ 'if', 'else', 'while', 'for',
+                       'continue', 'break', 'return', 'assert', 
+                       '\\\\result', '\\\\length', '\\\\old' ]
+    reserved_tplvl = [ 'typedef', 'struct' ]
+    reserved_const = [ 'true', 'false', 'NULL' ]
+    reserved_specs = [ 'requires', 'ensures', 'loop_invariant', 'assert' ]
+
+    id_re = r'[A-Za-z_][A-Za-z0-9_]*'
+    typedec_re = r'[*\[\]\s]*'
+    char_re = r'[!"#$%&\'()*+,\-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ`abcdefghijklmnopqrstuvwxyz{|}~ [\]_]'
+
+    def vardecls(terminator_re, popper = None, 
+                 id_re = id_re, typedec_re = typedec_re):
+        list = [
+            (r'(struct)(\s+)(%s)\b(%s)\b(%s)(\s*)(%s)' 
+             % (id_re, typedec_re, id_re, terminator_re),
+             bygroups(Keyword.Reserved, Text, 
+                      Name.Label, 
+                      Keyword.Type,
+                      Name.Variable, Text,
+                      Punctuation)),
+            (r'(%s)\b(%s)\b(%s)(\s*)(%s)'
+             % (id_re, typedec_re, id_re, terminator_re),
+             bygroups(Keyword.Type, 
+                      Keyword.Type, 
+                      Name.Variable, Text,
+                      Punctuation)),
+        ]
+
+        if(popper != None):
+            list.append(include('whitespace'))
+            list.append((popper, Punctuation, '#pop'))
+            list.append((r'\S+', Error, '#pop'))
+
+        return list
+
+    # Looks for both top-level declarations and 
+    tokens = {
+        'vardecls_fun': vardecls(r'[,)]', r''),
+
+        'vardecls_typedef': vardecls(r'[;]', r'[}]'),
+
+        'vardecls_main': vardecls(r'[;]'),
+
+        'pieces': [
+            (r'0[xX][0-9a-fA-F]+', Number.Hex),
+            (r'(0|[1-9][0-9]*)', Number.Integer),
+
+            (r'\"', String.Double, 'string'),
+            (r'\'(%s|\\[0ntvbrfa\\?\'"])\'' % char_re, String.Char),
+
+            (r'[\(\)\[\]\.,]', Punctuation),
+            (r'->', Operator),
+            (r'[!~\-+*/%<>=|&^?:]', Operator),
+        ],
+
+        'typedef': [
+            include('whitespace'),
+
+            # It's a struct
+            (r'(struct)(\s+)(%s)\b(%s)\b(%s)(\s*)(;)' 
+             % (id_re, typedec_re, id_re),
+             bygroups(Keyword.Reserved, Text, 
+                      Name.Label, 
+                      Keyword.Type,
+                      Keyword.Type, Text,
+                      Punctuation), '#pop'),
+
+            # It's any other type
+            (r'(%s)\b(%s)\b(%s)(\s*)(;)'
+             % (id_re, typedec_re, id_re),
+             bygroups(Keyword.Type, 
+                      Keyword.Type, 
+                      Keyword.Type, Text,
+                      Punctuation), '#pop'),
+
+            # It's gonna be a bit more complicated than all that
+            (r'(struct)(\s+)(%s)\b(\s*)([{])' % id_re,
+             bygroups(Keyword.Reserved, Text,
+                      Name.Label,
+                      Punctuation), 'vardecls_typedef'),
+
+            (id_re, Keyword.Type),
+            (r';', Punctuation, '#pop'),
+            (r'\S+', Error, '#pop'),
+            ],
+
+        'root': [
+            include('whitespace'),
+
+            # catch corner cases 
+            (r'(return)\b', Keyword.Reserved, 'core'),
+            (r'(else)\b', Keyword.Reserved),
+
+            # functions
+            (r'(struct)(\s+)(%s)\b(%s)\b(%s)\b(\s*)(\()' 
+             % (id_re, typedec_re, id_re),
+             bygroups(Keyword.Reserved, Text, 
+                      Name.Label, 
+                      Keyword.Type,
+                      Name.Function, Text,
+                      Punctuation), 'vardecls_fun'),
+
+            (r'(%s)\b(%s)\b(%s)\b(\s*)(\()' 
+             % (id_re, typedec_re, id_re),
+             bygroups(Keyword.Type,
+                      Keyword.Type,
+                      Name.Function, Text,
+                      Punctuation), 'vardecls_fun'),
+
+            # standard top-level nonsense
+            (r'(struct)(\s+)(%s)(\s*)([;{])' % id_re,
+             bygroups(Keyword.Reserved, Text, Name.Label, Text, Punctuation)),
+            (r'typedef', Keyword.Reserved, 'typedef'), 
+
+            # variable declarations
+            include('vardecls_main'),
+
+            # variable definitions
+            (r'(struct)(\s+)(%s)\b(%s)\b(%s)(\s*)(=)' 
+             % (id_re, typedec_re, id_re),
+             bygroups(Keyword.Reserved, Text, 
+                      Name.Label, 
+                      Keyword.Type,
+                      Name.Variable, Text,
+                      Operator),
+             'core'),
+            (r'(%s)\b(%s)\b(%s)(\s*)(=)'
+             % (id_re, typedec_re, id_re),
+             bygroups(Keyword.Type, 
+                      Keyword.Type,
+                      Name.Variable, Text,
+                      Operator),
+             'core'),
+            
+            # send it up to the core parser
+            (r'', Text, 'core'),
+        ],
+            
+        'core': [
+            include('whitespace'),
+            include('pieces'),
+
+            # Something top-level might come after this!
+            (r'[{};]', Punctuation, '#pop'),
+            
+            # Reserved words
+            (r'(alloc|alloc_array)(\s*\(\s*)(struct\s*)(%s)(%s)' 
+             % (id_re, typedec_re), 
+             bygroups(Keyword.Reserved, Punctuation,
+                      Keyword.Reserved, Name.Label, Keyword.Type)),
+            (r'(alloc|alloc_array)(\s*\(\s*)(%s)(%s)' 
+             % (id_re, typedec_re), 
+             bygroups(Keyword.Reserved, Punctuation,
+                      Keyword.Type, Keyword.Type)),
+            (r'(for\s*)(\()', bygroups(Keyword.Reserved, Punctuation), '#pop'),
+            (r'(%s)\b' % '|'.join(reserved_opers), Keyword.Reserved),
+            (r'(%s)\b' % '|'.join(reserved_tplvl), Error),
+            
+            (r'(%s)' % id_re, Name),
+            (r'\S+', Error, '#pop'),
+        ],
+
+        'string': [
+            (r'"', String.Double, '#pop'),
+            (r'\\[ntvbrfa\\?\'"]', String.Escape),
+            (r'\\\n', Error, '#pop'),
+            (r'\\.', Error),
+            (char_re, String.Double),
+            (r'[^"]*"', Error, '#pop'),
+        ],
+
+        'whitespace': [
+            (r'\s+', Text),
+            (r'//@', Comment.Special, 'singleanno'),
+            (r'//[^\n]*', Comment.Single),
+            (r'#', Comment.Special, 'pragma'),
+            (r'/\*@', Comment.Special, 'anno'),
+            (r'/\*', Comment.Multiline, 'comment'),
+        ],
+
+        'pragma': [
+            (r'\\\n', Comment.Special),
+            (r'\n', Comment.Special, '#pop'),
+            (r'.', Comment.Special),
+        ],
+
+        'singleanno': [
+            (r'\n', Text, '#pop'),
+            (r'\s', Text),
+            (r'//@[^\n]*', Error, '#pop'),
+            (r'//[^\n]*', Comment.Single, '#pop'),
+            (r'#[^\n]*', Error, '#pop'),
+            (r'/\*@', Error, 'comment'),
+            (r'/\*', Comment.Multiline, ('#pop', 'comment')),            
+            (r'@', Comment.Special),
+
+            include('pieces'),
+            (r'[{};]', Punctuation),
+
+            # Reserved words
+            (r'(%s)\b' % '|'.join(reserved_opers), Keyword.Reserved),
+            (r'(%s)\b' % '|'.join(reserved_tplvl), Error),
+            (r'(%s)\b' % '|'.join(reserved_specs), Keyword.Reserved),
+
+            (r'(%s)\b' % '|'.join(reserved_opers), Keyword.Reserved),
+            (r'(%s)\b' % '|'.join(reserved_tplvl), Error),
+            
+            (r'(%s)' % id_re, Name),
+            (r'\S+', Error, '#pop'),
+        ],
+
+        'anno': [
+            (r'\s+', Text),
+            (r'//@[^\n]*', Error),
+            (r'//[^\n]*', Comment.Single),
+            (r'/\*@', Error, '#push'),
+            (r'/\*', Comment.Multiline, 'comment'),
+            (r'@\*/', Comment.Special, '#pop'),
+            (r'\*/', Error, '#pop'),
+            (r'@', Comment.Special),
+
+            include('pieces'),
+            (r'[{};]', Punctuation),
+
+            # Reserved words
+            (r'(%s)\b' % '|'.join(reserved_opers), Keyword.Reserved),
+            (r'(%s)\b' % '|'.join(reserved_tplvl), Error),
+            (r'(%s)\b' % '|'.join(reserved_specs), Keyword.Reserved),
+
+            (r'(%s)\b' % '|'.join(reserved_opers), Keyword.Reserved),
+            (r'(%s)\b' % '|'.join(reserved_tplvl), Error),
+            
+            (r'(%s)' % id_re, Name),
+            (r'\S+', Error, '#pop'),
+        ],
+
+        'comment': [
+            (r'[^/*@]', Comment.Multiline),
+            (r'/\*@', Comment.Multiline, '#push'),
+            (r'/\*', Comment.Multiline, '#push'),
+            (r'@\*/', Comment.Multiline, '#pop'),
+            (r'\*/', Comment.Multiline, '#pop'),
+            (r'[/*@]', Comment.Multiline),
+        ],
+    }
+
+    def get_tokens_unprocessed(self, text):
+        for index, token, value in \
+            RegexLexer.get_tokens_unprocessed(self, text):
+            if token is Name:
+                if value in self.reserved_const:
+                    token = Name.Builtin
             yield index, token, value
 
 class CppLexer(RegexLexer):
