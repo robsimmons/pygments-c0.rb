@@ -16,14 +16,14 @@ from pygments.lexer import Lexer, RegexLexer, include, bygroups, using, \
      this, combined
 from pygments.util import get_bool_opt, get_list_opt
 from pygments.token import Text, Comment, Operator, Keyword, Name, String, \
-     Number, Punctuation, Error, Literal
+     Number, Punctuation, Error, Literal, Generic
 from pygments.scanner import Scanner
 
 # backwards compatibility
 from pygments.lexers.functional import OcamlLexer
 from pygments.lexers.jvm import JavaLexer, ScalaLexer
 
-__all__ = ['CLexer', 'C0Lexer',
+__all__ = ['CLexer', 'CoinLexer', 'C0Lexer',
            'CppLexer', 'DLexer', 'DelphiLexer', 'ECLexer',
            'DylanLexer', 'ObjectiveCLexer', 'FortranLexer', 'GLShaderLexer',
            'PrologLexer', 'CythonLexer', 'ValaLexer', 'OocLexer', 'GoLexer',
@@ -167,6 +167,33 @@ class CLexer(RegexLexer):
                 elif self.c99highlighting and value in self.c99_types:
                     token = Keyword.Type
             yield index, token, value
+
+class CoinLexer(RegexLexer):
+    # Doesn't really belong in compiled.py, but whatever, it's my fork
+
+    """
+    For Coin shell code
+    """
+    name = 'Coin'
+    aliases = ['coin']
+    filenames = ['*.coin']
+    mimetypes = ['text/x-c0coin']
+    
+    # Callbacks for distinguishing tokens and reserved words
+    def heading_callback(self, match):
+        if '--quiet' in match.group(1):
+            yield match.start(1), Generic.Deleted, match.group(1)[0:0]
+        else:
+            yield match.start(1), Generic.Strong, match.group(1)
+
+    tokens = {
+        'root': [
+            (r'([%$][^\n]*\n?)', heading_callback),
+            (r'(-->)([^\n]*\n?)', bygroups(Generic.Prompt, Generic.Strong)),
+            (r'(\.\.\.)([^\n]*\n?)', bygroups(Generic.Prompt, Generic.Strong)),
+            (r'[^\n]*\n', Generic.Output),
+        ]
+    }
 
 class C0Lexer(RegexLexer):
     """
